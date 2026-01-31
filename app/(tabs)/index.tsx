@@ -1,48 +1,43 @@
-import { makeRedirectUri } from 'expo-auth-session';
-import * as WebBrowser from 'expo-web-browser';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { getSupabase } from '../../lib/supabase';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../../lib/supabase';
+export default function HomeScreen() {
+  const [email, setEmail] = useState<string | null>(null);
+  const router = useRouter();
 
-WebBrowser.maybeCompleteAuthSession();
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-export default function LoginScreen() {
-  const handleGoogleSignIn = async () => {
-    const supabase = getSupabase();
-    const redirectTo = makeRedirectUri();
-    
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        skipBrowserRedirect: Platform.OS !== 'web',
-      },
-    });
+      if (mounted && session?.user) setEmail(session.user.email ?? null);
+    })();
 
-    if (error) {
-      console.error('Error signing in:', error.message);
-      return;
-    }
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-    if (Platform.OS === 'web') {
-      // On web, redirect directly
-      if (data?.url) {
-        window.location.href = data.url;
-      }
-    } else {
-      // On mobile, use WebBrowser
-      if (data?.url) {
-        await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-      }
-    }
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
   };
+
+  const goProfile = () => router.push('/profile');
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Gas & Grocery Optimizer</Text>
-      <Text style={styles.subtitle}>Save money, save time</Text>
-      
-      <TouchableOpacity style={styles.button} onPress={handleGoogleSignIn}>
-        <Text style={styles.buttonText}>Sign in with Google</Text>
+      <Text style={styles.title}>Welcome</Text>
+      <Text style={styles.subtitle}>{email ?? 'Your account'}</Text>
+
+      <TouchableOpacity style={styles.button} onPress={handleSignOut}>
+        <Text style={styles.buttonText}>Sign out</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.profileButton} onPress={goProfile}>
+        <Text style={styles.profileButtonText}>Edit Profile</Text>
       </TouchableOpacity>
     </View>
   );
@@ -68,7 +63,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   button: {
-    backgroundColor: '#4285F4',
+    backgroundColor: '#444',
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 8,
@@ -76,6 +71,20 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  profileButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: '#4285F4',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  profileButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
   },
 });
