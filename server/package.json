@@ -1,19 +1,25 @@
 {
-  "name": "server",
+  "name": "gas-optimizer-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "proxy.js",
+  "main": "api-only.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node api-only.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.93.3",
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "puppeteer": "^24.36.1"
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }
+```
+
+Save (Ctrl+O, Enter, Ctrl+X).
+
+**Fix 2: Update Railway start command to be simpler:**
+
+In Railway Settings → Custom Start Command, change to:
+```
+cd server && npm install && npm start
