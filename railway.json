@@ -1,0 +1,9 @@
+{
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "cd server && npm install && node proxy.js",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
