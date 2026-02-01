@@ -14,7 +14,6 @@ const supabase = createClient(
 app.use(cors());
 app.use(express.json());
 
-// Haversine distance calculation
 function haversineDistance(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -26,7 +25,6 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return Math.round(R * c * 100) / 100;
 }
 
-// Get driving distances from Google
 async function getDrivingDistances(originLat, originLng, stations) {
   if (!stations.length) return stations;
   const batchSize = 25;
@@ -55,7 +53,6 @@ async function getDrivingDistances(originLat, originLng, stations) {
   return stations;
 }
 
-// Get nearby stations from database
 app.get('/api/stations/nearby', async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
@@ -69,14 +66,12 @@ app.get('/api/stations/nearby', async (req, res) => {
 
     console.log('Fetching stations near:', userLat, userLng, 'radius:', maxRadius);
 
-    // Get all stations from database
     const { data: allStations, error } = await supabase
       .from('stations')
       .select('*');
 
     if (error) throw error;
 
-    // Filter by distance and calculate straight-line distance
     const nearbyStations = allStations
       .map(s => ({
         ...s,
@@ -89,7 +84,6 @@ app.get('/api/stations/nearby', async (req, res) => {
 
     console.log(`Found ${nearbyStations.length} stations within ${maxRadius}km`);
 
-    // Get driving distances for nearby stations
     const withDriving = await getDrivingDistances(userLat, userLng, nearbyStations.slice(0, 50));
 
     res.json({ 
@@ -103,12 +97,10 @@ app.get('/api/stations/nearby', async (req, res) => {
   }
 });
 
-// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Proxy for FuelEconomy API
 app.use('/api/fueleconomy', async (req, res) => {
   try {
     const path = req.url;
@@ -125,10 +117,4 @@ app.use('/api/fueleconomy', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`API server listening on port ${PORT}`);
 });
-```
 
-Save it. Then update Railway's start command to use this file:
-
-**In Railway Settings → Deploy → Custom Start Command:**
-```
-cd server && npm install && node api-only.js
