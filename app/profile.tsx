@@ -2,18 +2,19 @@ import { supabase } from '@/lib/supabase';
 import { Picker } from '@react-native-picker/picker';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { Alert, Button, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// Use local proxy for web to avoid CORS issues during development
 const PROXY_BASE = 'http://localhost:3001/api';
-const NHTSA_BASE = Platform.OS === 'web' ? `${PROXY_BASE}/nhtsa` : 'https://vpic.nhtsa.dot.gov/api/vehicles';
 const FUELECONOMY_BASE = Platform.OS === 'web' ? `${PROXY_BASE}/fueleconomy` : 'https://www.fueleconomy.gov/ws/rest';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  const initialLoadDone = useRef(false);
+  const savedVehicleData = useRef<{make: string, model: string, trim: string}>({make: '', model: '', trim: ''});
 
   const [profile, setProfile] = useState<any>({
     vehicle_year: '',
@@ -27,14 +28,16 @@ export default function ProfileScreen() {
     home_lng: '',
     max_detour_km: '5.0',
     min_savings: '1.0',
+    search_radius_km: '15.0',
   });
 
   const [years] = useState(() => {
     const now = new Date().getFullYear();
     const list: string[] = [];
-    for (let y = now; y >= 1980; y--) list.push(String(y));
+    for (let y = now + 1; y >= 1980; y--) list.push(String(y));
     return list;
   });
+  
   const [makes, setMakes] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [trims, setTrims] = useState<{ value: string; text: string }[]>([]);
@@ -43,10 +46,10 @@ export default function ProfileScreen() {
   const [manualFuelMode, setManualFuelMode] = useState(false);
   const [makesLoading, setMakesLoading] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
 
-  // simple in-memory caches to reduce API calls
-  const makesCache = React.useRef<Record<string, string[]>>({});
-  const modelsCache = React.useRef<Record<string, string[]>>({});
+  const makesCache = useRef<Record<string, string[]>>({});
+  const modelsCache = useRef<Record<string, string[]>>({});
 
   useEffect(() => {
     let mounted = true;
@@ -54,9 +57,7 @@ export default function ProfileScreen() {
     (async () => {
       setLoading(true);
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
         const user = session?.user;
         if (!user) {
           router.replace('/login');
@@ -68,7 +69,12 @@ export default function ProfileScreen() {
         if (!mounted) return;
 
         if (data) {
-          // Map null/number values to strings for inputs
+          savedVehicleData.current = {
+            make: data.vehicle_make ?? '',
+            model: data.vehicle_model ?? '',
+            trim: data.vehicle_trim ?? '',
+          };
+          
           setProfile({
             vehicle_year: data.vehicle_year?.toString() ?? '',
             vehicle_make: data.vehicle_make ?? '',
@@ -81,6 +87,7 @@ export default function ProfileScreen() {
             home_lng: data.home_lng?.toString() ?? '',
             max_detour_km: data.max_detour_km?.toString() ?? '5.0',
             min_savings: data.min_savings?.toString() ?? '1.0',
+            search_radius_km: data.search_radius_km?.toString() ?? '15.0',
           });
         }
       } catch (e: any) {
@@ -91,84 +98,96 @@ export default function ProfileScreen() {
       }
     })();
 
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [router]);
 
   useEffect(() => {
-  // When vehicle_year changes, fetch makes from FuelEconomy.gov
-  const year = profile.vehicle_year;
-  if (!year) return;
+    const year = profile.vehicle_year;
+    if (!year) return;
 
-  let mounted = true;
-  (async () => {
-    setMakesLoading(true);
-    try {
-      if (makesCache.current[year]) {
-        setMakes(makesCache.current[year]);
-      } else {
-        const res = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/make?year=${year}`);
-        const text = await res.text();
-        if (!mounted) return;
-        // Parse XML: extract all <value> tags
-        const matches = [...text.matchAll(/<value>([^<]+)<\/value>/g)];
-        const list = matches.map(m => m[1]).filter(Boolean);
-        const unique = [...new Set(list)].sort();
-        makesCache.current[year] = unique;
-        setMakes(unique);
+    let mounted = true;
+    (async () => {
+      setMakesLoading(true);
+      try {
+        let makesList: string[];
+        if (makesCache.current[year]) {
+          makesList = makesCache.current[year];
+        } else {
+          const res = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/make?year=${year}`);
+          const text = await res.text();
+          if (!mounted) return;
+          const matches = [...text.matchAll(/<value>([^<]+)<\/text>/g)];
+          const list = matches.map(m => m[1]).filter(Boolean);
+          makesList = [...new Set(list)].sort();
+          makesCache.current[year] = makesList;
+        }
+        setMakes(makesList);
+        
+        if (!initialLoadDone.current && savedVehicleData.current.make) {
+          if (makesList.includes(savedVehicleData.current.make)) {
+            setProfile((p: any) => ({ ...p, vehicle_make: savedVehicleData.current.make }));
+          }
+        } else if (initialLoadDone.current) {
+          setModels([]);
+          setTrims([]);
+          setProfile((p: any) => ({ ...p, vehicle_make: '', vehicle_model: '', vehicle_trim: '' }));
+        }
+      } catch (e) {
+        console.warn('Failed to load makes', e);
+        setMakes([]);
+      } finally {
+        if (mounted) setMakesLoading(false);
       }
-      setModels([]);
-      setProfile((p: any) => ({ ...p, vehicle_make: '', vehicle_model: '' }));
-    } catch (e) {
-      console.warn('Failed to load makes', e);
-      setMakes([]);
-    } finally {
-      if (mounted) setMakesLoading(false);
-    }
-  })();
+    })();
 
-  return () => { mounted = false; };
-}, [profile.vehicle_year]);
-
-useEffect(() => {
-  // When make changes, fetch models from FuelEconomy.gov
-  const year = profile.vehicle_year;
-  const make = profile.vehicle_make;
-  if (!year || !make) return;
-
-  let mounted = true;
-  (async () => {
-    setModelsLoading(true);
-    try {
-      const cacheKey = `${year}|${make}`;
-      if (modelsCache.current[cacheKey]) {
-        setModels(modelsCache.current[cacheKey]);
-      } else {
-        const res = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/model?year=${year}&make=${encodeURIComponent(make)}`);
-        const text = await res.text();
-        if (!mounted) return;
-        // Parse XML: extract all <value> tags
-        const matches = [...text.matchAll(/<value>([^<]+)<\/value>/g)];
-        const list = matches.map(m => m[1]).filter(Boolean);
-        const unique = [...new Set(list)].sort();
-        modelsCache.current[cacheKey] = unique;
-        setModels(unique);
-      }
-      setProfile((p: any) => ({ ...p, vehicle_model: '' }));
-    } catch (e) {
-      console.warn('Failed to load models', e);
-      setModels([]);
-    } finally {
-      if (mounted) setModelsLoading(false);
-    }
-  })();
-
-  return () => { mounted = false; };
-}, [profile.vehicle_make, profile.vehicle_year]);
+    return () => { mounted = false; };
+  }, [profile.vehicle_year]);
 
   useEffect(() => {
-    // When model selected, fetch fueleconomy to auto-fill fuel_efficiency and fuel_type
+    const year = profile.vehicle_year;
+    const make = profile.vehicle_make;
+    if (!year || !make) return;
+
+    let mounted = true;
+    (async () => {
+      setModelsLoading(true);
+      try {
+        const cacheKey = `${year}|${make}`;
+        let modelsList: string[];
+        if (modelsCache.current[cacheKey]) {
+          modelsList = modelsCache.current[cacheKey];
+        } else {
+          const res = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/model?year=${year}&make=${encodeURIComponent(make)}`);
+          const text = await res.text();
+          if (!mounted) return;
+          const matches = [...text.matchAll(/<value>([^<]+)<\/text>/g)];
+          const list = matches.map(m => m[1]).filter(Boolean);
+          modelsList = [...new Set(list)].sort();
+          modelsCache.current[cacheKey] = modelsList;
+        }
+        setModels(modelsList);
+        
+        if (!initialLoadDone.current && savedVehicleData.current.model) {
+          if (modelsList.includes(savedVehicleData.current.model)) {
+            setProfile((p: any) => ({ ...p, vehicle_model: savedVehicleData.current.model }));
+          }
+          setTimeout(() => { initialLoadDone.current = true; }, 500);
+        } else if (initialLoadDone.current) {
+          setTrims([]);
+          setProfile((p: any) => ({ ...p, vehicle_model: '', vehicle_trim: '' }));
+        }
+      } catch (e) {
+        console.warn('Failed to load models', e);
+        setModels([]);
+      } finally {
+        if (mounted) setModelsLoading(false);
+      }
+    })();
+
+    return () => { mounted = false; };
+  }, [profile.vehicle_make, profile.vehicle_year]);
+
+  useEffect(() => {
     const year = profile.vehicle_year;
     const make = profile.vehicle_make;
     const model = profile.vehicle_model;
@@ -177,40 +196,47 @@ useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        // first try to get trims/options for the model (menu/options)
         const optsRes = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/options?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`);
         const optsText = await optsRes.text();
         if (!mounted) return;
-        // parse all <menuItem> entries to extract <text> and <value>
+        
         const itemRegex = /<menuItem>[\s\S]*?<text>([\s\S]*?)<\/text>[\s\S]*?<value>(\d+)<\/value>[\s\S]*?<\/menuItem>/g;
         const found: { value: string; text: string }[] = [];
         let m;
-        // eslint-disable-next-line no-cond-assign
         while ((m = itemRegex.exec(optsText)) !== null) {
           found.push({ text: m[1], value: m[2] });
         }
+        
         if (found.length > 0) {
           setTrims(found);
-          setSelectedTrimId('');
-          // if only one trim, auto-select it and fetch details
-          if (found.length === 1) {
+          
+          if (!initialLoadDone.current && savedVehicleData.current.trim) {
+            const matchingTrim = found.find(t => t.text === savedVehicleData.current.trim);
+            if (matchingTrim) {
+              setSelectedTrimId(matchingTrim.value);
+              setProfile((p: any) => ({ ...p, vehicle_trim: matchingTrim.text }));
+            }
+          } else if (found.length === 1) {
             setSelectedTrimId(found[0].value);
+            setProfile((p: any) => ({ ...p, vehicle_trim: found[0].text }));
+          } else {
+            setSelectedTrimId('');
           }
           return;
         }
 
-        // fallback: try the model menu which may return a single value
         const menuRes = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/model?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`);
         const menuText = await menuRes.text();
         const idMatch = menuText.match(/<value>(\d+)<\/value>/);
         if (!idMatch) return;
+        
         const vid = idMatch[1];
-        // fetch vehicle details directly
         const vehRes = await fetch(`${FUELECONOMY_BASE}/vehicle/${vid}`);
         const vehText = await vehRes.text();
         const combMatch = vehText.match(/<comb08>([0-9.]+)<\/comb08>/);
         const fuelTypeMatch = vehText.match(/<fuelType>([^<]+)<\/fuelType>/);
         if (!mounted) return;
+        
         if (combMatch) {
           const mpg = parseFloat(combMatch[1]);
           const lPer100km = +(235.214583 / mpg).toFixed(2);
@@ -226,15 +252,13 @@ useEffect(() => {
       }
     })();
 
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [profile.vehicle_model]);
 
   useEffect(() => {
-    // when a trim id is selected, fetch vehicle details for that trim id
     const vid = selectedTrimId;
     if (!vid) return;
+    
     let mounted = true;
     (async () => {
       try {
@@ -243,6 +267,7 @@ useEffect(() => {
         const combMatch = vehText.match(/<comb08>([0-9.]+)<\/comb08>/);
         const fuelTypeMatch = vehText.match(/<fuelType>([^<]+)<\/fuelType>/);
         if (!mounted) return;
+        
         if (combMatch) {
           const mpg = parseFloat(combMatch[1]);
           const lPer100km = +(235.214583 / mpg).toFixed(2);
@@ -259,17 +284,13 @@ useEffect(() => {
       }
     })();
 
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [selectedTrimId]);
 
   const save = async () => {
     setSaving(true);
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) {
         router.replace('/login');
@@ -289,6 +310,7 @@ useEffect(() => {
         home_lng: profile.home_lng === '' ? null : parseFloat(profile.home_lng),
         max_detour_km: profile.max_detour_km === '' ? 5.0 : parseFloat(profile.max_detour_km),
         min_savings: profile.min_savings === '' ? 1.0 : parseFloat(profile.min_savings),
+        search_radius_km: profile.search_radius_km === '' ? 15.0 : parseFloat(profile.search_radius_km),
         updated_at: new Date().toISOString(),
       };
 
@@ -304,161 +326,399 @@ useEffect(() => {
     }
   };
 
-  return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Your Profile</Text>
-
-        <Text style={styles.label}>Vehicle Year</Text>
-        <View style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 6, overflow: 'hidden' }}>
-          <Picker selectedValue={profile.vehicle_year} onValueChange={(v) => setProfile({ ...profile, vehicle_year: v })}>
-            <Picker.Item label="Select year" value="" />
-            {years.map((y) => (
-              <Picker.Item key={y} label={y} value={y} />
-            ))}
-          </Picker>
-        </View>
-
-        <Text style={styles.label}>Vehicle Make</Text>
-        <View style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 6, overflow: 'hidden' }}>
-          <Picker
-            selectedValue={profile.vehicle_make}
-            onValueChange={(v) => setProfile({ ...profile, vehicle_make: v })}
-            enabled={!!profile.vehicle_year && !makesLoading}
-          >
-            <Picker.Item label={makesLoading ? 'Loading makes...' : 'Select make'} value="" />
-            {!makesLoading && makes.length === 0 ? (
-              <Picker.Item label="No makes found" value="" />
-            ) : (
-              makes.map((m) => <Picker.Item key={m} label={m} value={m} />)
-            )}
-          </Picker>
-        </View>
-
-        <Text style={styles.label}>Vehicle Model</Text>
-        <View style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 6, overflow: 'hidden' }}>
-          <Picker
-            selectedValue={profile.vehicle_model}
-            onValueChange={(v) => setProfile({ ...profile, vehicle_model: v })}
-            enabled={!!profile.vehicle_make && !modelsLoading}
-          >
-            <Picker.Item label={modelsLoading ? 'Loading models...' : 'Select model'} value="" />
-            {!modelsLoading && models.length === 0 ? (
-              <Picker.Item label="No models found" value="" />
-            ) : (
-              models.map((m) => <Picker.Item key={m} label={m} value={m} />)
-            )}
-          </Picker>
-        </View>
-
-        <Text style={styles.label}>Vehicle Trim</Text>
-        {trims.length > 0 ? (
-          <View style={{ borderWidth: 1, borderColor: '#ddd', borderRadius: 6, overflow: 'hidden' }}>
-            <Picker selectedValue={selectedTrimId} onValueChange={(v) => {
-              setSelectedTrimId(v);
-              // also set readable trim text in profile
-              const found = trims.find(t => t.value === v);
-              setProfile((p: any) => ({ ...p, vehicle_trim: found?.text ?? '' }));
-            }}>
-              <Picker.Item label="Select trim" value="" />
-              {trims.map((t) => (
-                <Picker.Item key={t.value} label={t.text} value={t.value} />
-              ))}
-            </Picker>
-          </View>
-        ) : (
-          <TextInput style={styles.input} value={profile.vehicle_trim} onChangeText={(t) => setProfile({ ...profile, vehicle_trim: t })} />
-        )}
-
-        {lookupError ? (
-          <View style={{ marginTop: 8 }}>
-            <Text style={{ color: 'red' }}>Fuel lookup failed: {lookupError}</Text>
-            <Button title={manualFuelMode ? 'Use automatic lookup' : 'Enter fuel efficiency manually'} onPress={() => setManualFuelMode(!manualFuelMode)} />
-          </View>
-        ) : null}
-
-        {manualFuelMode ? (
-          <>
-            <Text style={styles.label}>Fuel Efficiency (L/100km)</Text>
-            <TextInput style={styles.input} keyboardType="numeric" value={profile.fuel_efficiency} onChangeText={(t) => setProfile({ ...profile, fuel_efficiency: t })} />
-          </>
-        ) : null}
-
-        {/* Fuel efficiency is automatically determined from selected year/make/model and hidden from the user */}
-
-        <Text style={styles.label}>Fuel Type</Text>
-        <TextInput style={styles.input} value={profile.fuel_type} onChangeText={(t) => setProfile({ ...profile, fuel_type: t })} />
-
-     <Text style={styles.label}>Home Location</Text>
-<Button
-  title={profile.home_lat && profile.home_lng ? 'Location set — update' : 'Set my location'}
-  onPress={async () => {
+  const getLocation = async () => {
+    setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission denied', 'Location permission is required to set your home location.');
+        Alert.alert('Permission denied', 'Location permission is required.');
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setProfile((p: any) => ({ ...p, home_lat: String(pos.coords.latitude), home_lng: String(pos.coords.longitude) }));
+      setProfile((p: any) => ({ 
+        ...p, 
+        home_lat: String(pos.coords.latitude), 
+        home_lng: String(pos.coords.longitude) 
+      }));
     } catch (e: any) {
       console.error('Location error', e);
       Alert.alert('Error', e.message || 'Failed to get location');
+    } finally {
+      setLocationLoading(false);
     }
-  }}
-/>
-<Text style={{ marginTop: 10, color: '#666', fontSize: 12 }}>Or enter coordinates manually:</Text>
-<View style={{ flexDirection: 'row', marginTop: 4 }}>
-  <TextInput
-    style={[styles.input, { flex: 1, marginRight: 8 }]}
-    placeholder="Latitude (e.g. 43.8971)"
-    keyboardType="decimal-pad"
-    value={profile.home_lat}
-    onChangeText={(t) => setProfile({ ...profile, home_lat: t })}
-  />
-  <TextInput
-    style={[styles.input, { flex: 1 }]}
-    placeholder="Longitude (e.g. -78.8658)"
-    keyboardType="decimal-pad"
-    value={profile.home_lng}
-    onChangeText={(t) => setProfile({ ...profile, home_lng: t })}
-  />
-</View>
+  };
 
-        <Text style={styles.label}>Max Detour (km)</Text>
-        <TextInput style={styles.input} keyboardType="numeric" value={profile.max_detour_km} onChangeText={(t) => setProfile({ ...profile, max_detour_km: t })} />
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    );
+  }
 
-        <Text style={styles.label}>Min Savings</Text>
-        <TextInput style={styles.input} keyboardType="numeric" value={profile.min_savings} onChangeText={(t) => setProfile({ ...profile, min_savings: t })} />
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Your Profile</Text>
 
-        <View style={{ height: 16 }} />
-        <Button title={saving ? 'Saving...' : 'Save Profile'} onPress={save} disabled={saving || loading} />
-        <View style={{ height: 8 }} />
-        <Button title="Cancel" onPress={() => router.back()} />
+        {/* Vehicle Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🚗 Vehicle Information</Text>
+          
+          <Text style={styles.label}>Year</Text>
+          <View style={styles.pickerContainer}>
+            <Picker 
+              selectedValue={profile.vehicle_year} 
+              onValueChange={(v) => setProfile({ ...profile, vehicle_year: v })}
+              style={styles.picker}
+            >
+              <Picker.Item label="Select year" value="" />
+              {years.map((y) => (
+                <Picker.Item key={y} label={y} value={y} />
+              ))}
+            </Picker>
+          </View>
+
+          <Text style={styles.label}>Make</Text>
+          <View style={styles.pickerContainer}>
+            <Picker
+              selectedValue={profile.vehicle_make}
+              onValueChange={(v) => setProfile({ ...profile, vehicle_make: v })}
+              enabled={!!profile.vehicle_year && !makesLoading}
+              style={styles.picker}
+            >
+              <Picker.Item label={makesLoading ? 'Loading...' : 'Select make'} value="" />
+              {makes.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+            </Picker>
+          </View>
+
+          <Text style={styles.label}>Model</Text>
+          <View style={styles.pickerContainer}>
+            <Picker
+              selectedValue={profile.vehicle_model}
+              onValueChange={(v) => setProfile({ ...profile, vehicle_model: v })}
+              enabled={!!profile.vehicle_make && !modelsLoading}
+              style={styles.picker}
+            >
+              <Picker.Item label={modelsLoading ? 'Loading...' : 'Select model'} value="" />
+              {models.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+            </Picker>
+          </View>
+
+          <Text style={styles.label}>Trim</Text>
+          {trims.length > 0 ? (
+            <View style={styles.pickerContainer}>
+              <Picker 
+                selectedValue={selectedTrimId} 
+                onValueChange={(v) => {
+                  setSelectedTrimId(v);
+                  const found = trims.find(t => t.value === v);
+                  setProfile((p: any) => ({ ...p, vehicle_trim: found?.text ?? '' }));
+                }}
+                style={styles.picker}
+              >
+                <Picker.Item label="Select trim" value="" />
+                {trims.map((t) => (
+                  <Picker.Item key={t.value} label={t.text} value={t.value} />
+                ))}
+              </Picker>
+            </View>
+          ) : (
+            <TextInput 
+              style={styles.input} 
+              value={profile.vehicle_trim} 
+              onChangeText={(t) => setProfile({ ...profile, vehicle_trim: t })} 
+              placeholder="Enter trim (optional)"
+            />
+          )}
+
+          {profile.fuel_efficiency ? (
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>⛽ Fuel efficiency: {profile.fuel_efficiency} L/100km</Text>
+              <Text style={styles.infoText}>🔋 Fuel type: {profile.fuel_type || 'Unknown'}</Text>
+            </View>
+          ) : null}
+
+          {lookupError && (
+            <TouchableOpacity style={styles.warningBox} onPress={() => setManualFuelMode(!manualFuelMode)}>
+              <Text style={styles.warningText}>⚠️ Auto-lookup failed. Tap to enter manually.</Text>
+            </TouchableOpacity>
+          )}
+
+          {manualFuelMode && (
+            <>
+              <Text style={styles.label}>Fuel Efficiency (L/100km)</Text>
+              <TextInput 
+                style={styles.input} 
+                keyboardType="numeric" 
+                value={profile.fuel_efficiency} 
+                onChangeText={(t) => setProfile({ ...profile, fuel_efficiency: t })} 
+                placeholder="e.g., 10.5"
+              />
+              <Text style={styles.label}>Fuel Type</Text>
+              <TextInput 
+                style={styles.input} 
+                value={profile.fuel_type} 
+                onChangeText={(t) => setProfile({ ...profile, fuel_type: t })}
+                placeholder="e.g., Regular"
+              />
+            </>
+          )}
+
+          <Text style={styles.label}>Tank Size (L)</Text>
+          <TextInput 
+            style={styles.input} 
+            keyboardType="numeric"
+            value={profile.tank_size_l} 
+            onChangeText={(t) => setProfile({ ...profile, tank_size_l: t })}
+            placeholder="e.g., 60"
+          />
+        </View>
+
+        {/* Location Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📍 Home Location</Text>
+          
+          <TouchableOpacity style={styles.locationButton} onPress={getLocation} disabled={locationLoading}>
+            {locationLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.locationButtonText}>
+                {profile.home_lat && profile.home_lng ? '📍 Update Location' : '📍 Set My Location'}
+              </Text>
+            )}
+          </TouchableOpacity>
+          
+          {profile.home_lat && profile.home_lng && (
+            <Text style={styles.coordsText}>
+              Current: {parseFloat(profile.home_lat).toFixed(4)}, {parseFloat(profile.home_lng).toFixed(4)}
+            </Text>
+          )}
+          
+          <Text style={styles.subLabel}>Or enter coordinates manually:</Text>
+          <View style={styles.row}>
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Latitude"
+              keyboardType="decimal-pad"
+              value={profile.home_lat}
+              onChangeText={(t) => setProfile({ ...profile, home_lat: t })}
+            />
+            <TextInput
+              style={[styles.input, styles.halfInput]}
+              placeholder="Longitude"
+              keyboardType="decimal-pad"
+              value={profile.home_lng}
+              onChangeText={(t) => setProfile({ ...profile, home_lng: t })}
+            />
+          </View>
+        </View>
+
+        {/* Search Settings Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>⚙️ Search Settings</Text>
+
+          <Text style={styles.label}>Search Radius (km)</Text>
+          <TextInput 
+            style={styles.input} 
+            keyboardType="numeric" 
+            value={profile.search_radius_km} 
+            onChangeText={(t) => setProfile({ ...profile, search_radius_km: t })}
+            placeholder="15"
+          />
+          <Text style={styles.helpText}>How far to search for gas stations</Text>
+
+          <Text style={styles.label}>Max Detour (km)</Text>
+          <TextInput 
+            style={styles.input} 
+            keyboardType="numeric" 
+            value={profile.max_detour_km} 
+            onChangeText={(t) => setProfile({ ...profile, max_detour_km: t })}
+            placeholder="5"
+          />
+          <Text style={styles.helpText}>Maximum extra distance you're willing to drive</Text>
+
+          <Text style={styles.label}>Minimum Savings ($)</Text>
+          <TextInput 
+            style={styles.input} 
+            keyboardType="numeric" 
+            value={profile.min_savings} 
+            onChangeText={(t) => setProfile({ ...profile, min_savings: t })}
+            placeholder="1.00"
+          />
+          <Text style={styles.helpText}>Only show "worth it" if savings exceed this amount</Text>
+        </View>
+
+        {/* Save Buttons */}
+        <TouchableOpacity 
+          style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
+          onPress={save} 
+          disabled={saving}
+        >
+          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Profile'}</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  scrollView: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
   container: {
-    padding: 20,
-    backgroundColor: '#fff',
+    padding: 16,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    marginTop: 40,
+    color: '#1a1a2e',
+  },
+  section: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16,
+    color: '#333',
   },
   label: {
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: 12,
+    marginBottom: 6,
     color: '#333',
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  subLabel: {
+    marginTop: 12,
+    marginBottom: 6,
+    color: '#666',
+    fontSize: 13,
+  },
+  helpText: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 4,
   },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
-    padding: 10,
-    borderRadius: 6,
+    padding: 12,
+    borderRadius: 8,
+    fontSize: 16,
+    backgroundColor: '#fafafa',
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#fafafa',
+  },
+  picker: {
+    height: 50,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  infoBox: {
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  infoText: {
+    color: '#1976d2',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  warningBox: {
+    backgroundColor: '#fff3e0',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  warningText: {
+    color: '#f57c00',
+    fontSize: 14,
+  },
+  locationButton: {
+    backgroundColor: '#4285F4',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  locationButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  coordsText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 13,
+    marginTop: 8,
+  },
+  saveButton: {
+    backgroundColor: '#4caf50',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#a5d6a7',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    backgroundColor: '#fff',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontSize: 16,
   },
 });

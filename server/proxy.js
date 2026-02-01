@@ -118,22 +118,30 @@ app.get('/api/gasbuddy/smart', async (req, res) => {
     
     // Build search terms (user's town + nearby towns + province)
     const searchTerms = [];
+    
+    // Add common nearby area names for better coverage
+    const additionalAreas = [
+      `${userLat.toFixed(2)},${userLng.toFixed(2)}`, // Coordinates search
+    ];
+
+    // If user's town is known, add variations
     if (userTown) {
-      searchTerms.push(`${userTown} ON`);
-    }
+    searchTerms.push(`${userTown} ON`);
+   } 
+
+    // Add nearby towns
     nearbyTowns.forEach(town => {
       if (town !== userTown) {
         searchTerms.push(`${town} ON`);
       }
     });
-    
-    // If no towns found, use coordinates as search
-    if (searchTerms.length === 0) {
-      searchTerms.push(`${userLat},${userLng}`);
-    }
-    
-    // Limit to 5 towns to avoid too many requests
-    const limitedSearchTerms = searchTerms.slice(0, 5);
+
+    // Add coordinate-based search as fallback
+    searchTerms.push(...additionalAreas);
+
+    // Remove duplicates and limit
+    const uniqueTerms = [...new Set(searchTerms)];
+    const limitedSearchTerms = uniqueTerms.slice(0, 8);
     console.log('Searching:', limitedSearchTerms);
     
     // Search all towns
