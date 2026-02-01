@@ -3,7 +3,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "cd server && npm install && node proxy.js",
+    "startCommand": "node server/api-only.js",
     "restartPolicyType": "ON_FAILURE"
   }
 }
