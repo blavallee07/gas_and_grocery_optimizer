@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+
 export default function HomeScreen() {
   const [email, setEmail] = useState<string | null>(null);
   const router = useRouter();
@@ -26,11 +27,16 @@ export default function HomeScreen() {
   };
 
   const goProfile = () => router.push('/profile');
+  const goGas = () => router.push('/gas');
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Welcome</Text>
       <Text style={styles.subtitle}>{email ?? 'Your account'}</Text>
+
+      <TouchableOpacity style={styles.gasButton} onPress={goGas}>
+        <Text style={styles.gasButtonText}>⛽ Find Gas</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity style={styles.button} onPress={handleSignOut}>
         <Text style={styles.buttonText}>Sign out</Text>
@@ -55,12 +61,24 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 8,
-    color: '#1a1a2e',
+    color: '#080809',
   },
   subtitle: {
     fontSize: 16,
     color: '#666',
     marginBottom: 40,
+  },
+  gasButton: {
+    backgroundColor: '#4caf50',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  gasButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
   },
   button: {
     backgroundColor: '#444',
