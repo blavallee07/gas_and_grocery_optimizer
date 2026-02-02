@@ -280,6 +280,20 @@ export default function GasScreen() {
   }
 
   const sortedStations = getSortedStations(stations);
+  // Only show stations with positive savings
+  const profitableStations = sortedStations.filter(s => s.net_savings > 0);
+  
+  // If no profitable stations, show only the closest one as baseline
+  const closestStation = [...stations].sort((a, b) => {
+    const distA = a.driving_distance_km || a.distance_km;
+    const distB = b.driving_distance_km || b.distance_km;
+    return distA - distB;
+  })[0];
+  
+  const displayStations = profitableStations.length > 0 
+    ? profitableStations 
+    : closestStation ? [closestStation] : [];
+  
   const bestStation = stations.find(s => s.worth_it && s.net_savings > 0) || stations[0];
   const cheapestStation = [...stations].sort((a, b) => (a.price_per_l || 999) - (b.price_per_l || 999))[0];
   // Find the most worth it station (highest net savings that's worth it)
@@ -369,13 +383,19 @@ export default function GasScreen() {
 
       {/* Sort Controls */}
       <View style={styles.sortContainer}>
-        <Text style={styles.sectionTitle}>All Stations ({stations.length})</Text>
-        <TouchableOpacity style={styles.sortButton} onPress={cycleSortOption}>
-          <Text style={styles.sortButtonText}>🔄 {getSortLabel()}</Text>
-        </TouchableOpacity>
+        <Text style={styles.sectionTitle}>
+          {profitableStations.length > 0 
+            ? `Money Saving Stations (${profitableStations.length})` 
+            : 'Closest Station (Baseline)'}
+        </Text>
+        {profitableStations.length > 0 && (
+          <TouchableOpacity style={styles.sortButton} onPress={cycleSortOption}>
+            <Text style={styles.sortButtonText}>🔄 {getSortLabel()}</Text>
+          </TouchableOpacity>
+        )}
       </View>
       
-      {sortedStations.map((station, index) => (
+      {displayStations.map((station, index) => (
         <View 
           key={station.id} 
           style={[
@@ -428,14 +448,15 @@ export default function GasScreen() {
                 <Text style={styles.detailValue}>{station.driving_duration_min} min</Text>
               </View>
             )}
-            {station.net_savings > 0 && (
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Savings</Text>
-                <Text style={[styles.detailValue, styles.savingsPositiveText]}>
-                  +${station.net_savings.toFixed(2)}
-                </Text>
-              </View>
-            )}
+            <View style={styles.detailItem}>
+              <Text style={styles.detailLabel}>Savings</Text>
+              <Text style={[
+                styles.detailValue, 
+                station.net_savings > 0 ? styles.savingsPositiveText : styles.savingsNeutralText
+              ]}>
+                {station.net_savings > 0 ? '+' : ''}${station.net_savings.toFixed(2)}
+              </Text>
+            </View>
           </View>
 
           {/* Status Badge */}
@@ -806,6 +827,9 @@ const styles = StyleSheet.create({
   },
   savingsPositiveText: {
     color: '#2e7d32',
+  },
+  savingsNeutralText: {
+    color: '#666',
   },
   savingsNegativeText: {
     color: '#d32f2f',
