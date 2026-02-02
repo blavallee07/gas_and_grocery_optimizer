@@ -1,10 +1,35 @@
+import { API_BASE } from '@/lib/config';
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const PROXY_BASE = 'http://localhost:3001/api';
+const fetchWithTimeout = async (url: string, options?: RequestInit, timeoutMs = 60000) => {
+  if (typeof AbortController === 'undefined') {
+    return fetch(url, options);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const getFetchErrorMessage = (error: any) => {
+  const message = (error?.message || String(error || '')).toLowerCase();
+  if (error?.name === 'AbortError') {
+    return 'Request timed out. Please try again.';
+  }
+  if (message.includes('failed to fetch') || message.includes('network request failed')) {
+    return 'Unable to reach the gas server. Start the proxy server (npm run start-proxy) and try again.';
+  }
+  return error?.message || 'Failed to fetch gas stations.';
+};
 
 // Brand logos
 const BRAND_LOGOS: Record<string, string> = {
@@ -48,6 +73,12 @@ interface StationResult extends Station {
 
 type SortOption = 'price' | 'distance' | 'savings' | 'worthIt';
 
+const SORT_OPTIONS: { key: SortOption; label: string }[] = [
+  { key: 'savings', label: 'Most Savings' },
+  { key: 'price', label: 'Lowest Price' },
+  { key: 'distance', label: 'Closest' },
+];
+
 export default function GasScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -56,7 +87,7 @@ export default function GasScreen() {
   const [profile, setProfile] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [sortBy, setSortBy] = useState<SortOption>('worthIt');
+  const [sortBy, setSortBy] = useState<SortOption>('savings');
 
   useEffect(() => {
     loadData();
@@ -87,6 +118,13 @@ export default function GasScreen() {
         return;
       }
 
+      if (!profileData?.vehicle_year || !profileData?.vehicle_make || !profileData?.vehicle_model || !profileData?.vehicle_trim) {
+        setError('Please complete your vehicle year, make, model, and trim in Profile first.');
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
       setProfile(profileData);
 
       const cacheKey = `gas_stations_${profileData.home_lat}_${profileData.home_lng}`;
@@ -112,11 +150,11 @@ export default function GasScreen() {
       }
 
       const radius = profileData.search_radius_km || 15;
-      const url = `${PROXY_BASE}/gasbuddy/smart?lat=${profileData.home_lat}&lng=${profileData.home_lng}&radius=${radius}`;
+      const url = `${API_BASE}/gasbuddy/smart?lat=${profileData.home_lat}&lng=${profileData.home_lng}&radius=${radius}`;
       
       console.log('Fetching Ontario gas stations from:', url);
       
-      const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      const response = await fetchWithTimeout(url, undefined, 60000);
       
       if (!response.ok) {
         console.error('HTTP error:', response.status, response.statusText);
@@ -151,7 +189,7 @@ export default function GasScreen() {
 
     } catch (e: any) {
       console.error('Load error:', e);
-      setError(e.message || 'Failed to load data');
+      setError(getFetchErrorMessage(e));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -240,21 +278,8 @@ export default function GasScreen() {
     }
   };
 
-  const getSortLabel = (): string => {
-    switch (sortBy) {
-      case 'price': return 'Cheapest First';
-      case 'distance': return 'Closest First';
-      case 'savings': return 'Best Savings';
-      case 'worthIt': return 'Best Value';
-      default: return 'Sort';
-    }
-  };
-
-  const cycleSortOption = () => {
-    const options: SortOption[] = ['worthIt', 'price', 'distance', 'savings'];
-    const currentIndex = options.indexOf(sortBy);
-    const nextIndex = (currentIndex + 1) % options.length;
-    setSortBy(options[nextIndex]);
+  const setSortOption = (option: SortOption) => {
+    setSortBy(option);
   };
 
   if (loading) {
@@ -280,25 +305,14 @@ export default function GasScreen() {
   }
 
   const sortedStations = getSortedStations(stations);
-  // Only show stations with positive savings
-  const profitableStations = sortedStations.filter(s => s.net_savings > 0);
-  
-  // If no profitable stations, show only the closest one as baseline
-  const closestStation = [...stations].sort((a, b) => {
-    const distA = a.driving_distance_km || a.distance_km;
-    const distB = b.driving_distance_km || b.distance_km;
-    return distA - distB;
-  })[0];
-  
-  const displayStations = profitableStations.length > 0 
-    ? profitableStations 
-    : closestStation ? [closestStation] : [];
-  
-  const bestStation = stations.find(s => s.worth_it && s.net_savings > 0) || stations[0];
+  const displayStations = sortedStations;
   const cheapestStation = [...stations].sort((a, b) => (a.price_per_l || 999) - (b.price_per_l || 999))[0];
   // Find the most worth it station (highest net savings that's worth it)
   const mostWorthItStation = [...stations]
     .filter(s => s.worth_it && s.net_savings > 0)
+    .sort((a, b) => b.net_savings - a.net_savings)[0];
+  const bestSavingsStation = [...displayStations]
+    .filter(s => s.net_savings > 0)
     .sort((a, b) => b.net_savings - a.net_savings)[0];
 
   return (
@@ -315,44 +329,8 @@ export default function GasScreen() {
         )}
       </View>
 
-      {/* Best Value Card */}
-      {bestStation && bestStation.net_savings > 0 && (
-        <View style={styles.bestCard}>
-          <View style={styles.bestBadge}>
-            <Text style={styles.bestBadgeText}>💰 BEST VALUE</Text>
-          </View>
-          <View style={styles.bestContent}>
-            <View style={styles.stationRow}>
-              {getBrandLogo(bestStation.name) && (
-                <Image source={{ uri: getBrandLogo(bestStation.name)! }} style={styles.logo} />
-              )}
-              <View style={styles.stationInfo}>
-                <Text style={styles.bestName}>{bestStation.name}</Text>
-                <Text style={styles.bestDistance}>
-                  {bestStation.driving_distance_km?.toFixed(1) || bestStation.distance_km.toFixed(1)} km
-                  {bestStation.driving_duration_min && ` • ${bestStation.driving_duration_min} min`}
-                </Text>
-                {bestStation.address && (
-                  <Text style={styles.address}>{bestStation.address}</Text>
-                )}
-              </View>
-              <View style={styles.priceContainer}>
-                <Text style={styles.bestPrice}>${bestStation.price_per_l?.toFixed(3)}</Text>
-                <Text style={styles.perLiter}>/L</Text>
-              </View>
-            </View>
-            <View style={styles.savingsContainer}>
-              <Text style={styles.savingsAmount}>Save ${bestStation.net_savings.toFixed(2)}</Text>
-              <Text style={styles.savingsDetail}>
-                ${bestStation.gross_savings.toFixed(2)} savings - ${bestStation.detour_cost.toFixed(2)} fuel cost
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-
       {/* Cheapest Price Card */}
-      {cheapestStation && cheapestStation.id !== bestStation?.id && (
+      {cheapestStation && (
         <View style={styles.cheapestCard}>
           <View style={styles.cheapestBadge}>
             <Text style={styles.cheapestBadgeText}>⛽ CHEAPEST</Text>
@@ -381,19 +359,70 @@ export default function GasScreen() {
         </View>
       )}
 
+      {/* Most Savings */}
+      {bestSavingsStation && (
+        <View style={styles.cheapestCard}>
+          <View style={styles.cheapestBadge}>
+            <Text style={styles.cheapestBadgeText}>💚 BEST SAVINGS</Text>
+          </View>
+          <View style={styles.stationRow}>
+            {getBrandLogo(bestSavingsStation.name) ? (
+              <Image source={{ uri: getBrandLogo(bestSavingsStation.name)! }} style={styles.logoSmall} />
+            ) : (
+              <View style={styles.logoPlaceholder}>
+                <Text style={styles.logoPlaceholderText}>{bestSavingsStation.name.charAt(0)}</Text>
+              </View>
+            )}
+            <View style={styles.stationInfo}>
+              <Text style={styles.stationName}>{bestSavingsStation.name}</Text>
+              <Text style={styles.stationDistance}>
+                {bestSavingsStation.driving_distance_km?.toFixed(1) || bestSavingsStation.distance_km.toFixed(1)} km
+                {bestSavingsStation.driving_duration_min && ` • ${bestSavingsStation.driving_duration_min} min`}
+              </Text>
+            </View>
+            <View style={styles.priceContainer}>
+              <Text style={[styles.stationPrice, styles.lowestPrice]}>
+                ${bestSavingsStation.price_per_l?.toFixed(3)}
+              </Text>
+              <Text style={styles.perLiterSmall}>/L</Text>
+            </View>
+          </View>
+          <View style={styles.savingsRow}>
+            <Text style={styles.savingsPositive}>+${bestSavingsStation.net_savings.toFixed(2)} net savings</Text>
+          </View>
+        </View>
+      )}
+
       {/* Sort Controls */}
       <View style={styles.sortContainer}>
         <Text style={styles.sectionTitle}>
-          {profitableStations.length > 0 
-            ? `Money Saving Stations (${profitableStations.length})` 
-            : 'Closest Station (Baseline)'}
+          Best Deals
         </Text>
-        {profitableStations.length > 0 && (
-          <TouchableOpacity style={styles.sortButton} onPress={cycleSortOption}>
-            <Text style={styles.sortButtonText}>🔄 {getSortLabel()}</Text>
-          </TouchableOpacity>
-        )}
       </View>
+
+      {displayStations.length > 0 && (
+        <View style={styles.sortOptionsRow}>
+          {SORT_OPTIONS.map(option => (
+            <TouchableOpacity
+              key={option.key}
+              style={[
+                styles.sortOption,
+                sortBy === option.key && styles.sortOptionActive,
+              ]}
+              onPress={() => setSortOption(option.key)}
+            >
+              <Text
+                style={[
+                  styles.sortOptionText,
+                  sortBy === option.key && styles.sortOptionTextActive,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
       
       {displayStations.map((station, index) => (
         <View 
@@ -402,6 +431,7 @@ export default function GasScreen() {
             styles.stationCard,
             station.is_baseline && styles.baselineCard,
             station.worth_it && station.net_savings > 0 && styles.worthItCard,
+            bestSavingsStation && station.id === bestSavingsStation.id && styles.bestSavingsCard,
           ]}
         >
           {/* Header Row */}
@@ -421,12 +451,17 @@ export default function GasScreen() {
                     <Text style={styles.inlineBadgeText}>📍 Closest</Text>
                   </View>
                 )}
+                {bestSavingsStation && station.id === bestSavingsStation.id && (
+                  <View style={styles.bestSavingsBadge}>
+                    <Text style={styles.bestSavingsBadgeText}>💚 Best Savings</Text>
+                  </View>
+                )}
               </View>
             </View>
             <View style={styles.cardPriceMain}>
               <Text style={[
                 styles.cardPrice,
-                mostWorthItStation && station.id === mostWorthItStation.id && styles.cardPriceCheapest,
+                bestSavingsStation && station.id === bestSavingsStation.id && styles.cardPriceCheapest,
               ]}>
                 ${station.price_per_l?.toFixed(3)}
               </Text>
@@ -465,9 +500,9 @@ export default function GasScreen() {
               <Text style={styles.worthItBannerText}>✓ Worth the trip • Save ${station.net_savings.toFixed(2)}</Text>
             </View>
           )}
-          {!station.is_baseline && station.net_savings < 0 && Math.abs(station.net_savings) > 0.5 && (
+          {station.net_savings < 0 && !station.is_baseline && (
             <View style={styles.notWorthItBanner}>
-              <Text style={styles.notWorthItBannerText}>⚠️ Not worth the detour</Text>
+              <Text style={styles.notWorthItBannerText}>⚠️ -${Math.abs(station.net_savings).toFixed(2)} net loss</Text>
             </View>
           )}
         </View>
@@ -560,6 +595,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#4285F4',
+  },
+  sortOptionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  categoryBubble: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 12,
+    borderRadius: 12,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  categoryHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  stationCardInCategory: {
+    marginHorizontal: 0,
+    marginBottom: 0,
+  },
+  sortOption: {
+    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  sortOptionActive: {
+    backgroundColor: '#4285F4',
+    borderColor: '#4285F4',
+  },
+  sortOptionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4285F4',
+  },
+  sortOptionTextActive: {
+    color: '#fff',
   },
   // Best Value Card
   bestCard: {
@@ -735,6 +820,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#66bb6a',
   },
+  bestSavingsCard: {
+    borderWidth: 2,
+    borderColor: '#2e7d32',
+  },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -783,6 +872,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#1976d2',
     fontWeight: '600',
+  },
+  bestSavingsBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#e8f5e9',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  bestSavingsBadgeText: {
+    fontSize: 11,
+    color: '#2e7d32',
+    fontWeight: '700',
   },
   cardPriceMain: {
     alignItems: 'flex-end',
@@ -844,6 +946,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#2e7d32',
     fontWeight: '700',
+  },
+  neutralSavingsBanner: {
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  neutralSavingsText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '600',
   },
   notWorthItBanner: {
     backgroundColor: '#fff3e0',

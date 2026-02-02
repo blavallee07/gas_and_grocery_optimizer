@@ -56,6 +56,7 @@ export default function ProfileScreen() {
   const [makesLoading, setMakesLoading] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [locationFailed, setLocationFailed] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
   const makesCache = useRef<Record<string, string[]>>({});
@@ -339,88 +340,69 @@ export default function ProfileScreen() {
   }, [selectedTrimId]);
 
   const save = async () => {
+    if (saving) return;
+    
     setSaving(true);
+    
     try {
-      console.log('Starting save operation...');
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        console.error('Session error during save:', sessionError);
-        throw new Error('Authentication error. Please log in again.');
-      }
-      
+      const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
+      
       if (!user) {
-        console.log('No user session during save');
-        Alert.alert('Session Expired', 'Please log in again.', [
-          { text: 'OK', onPress: () => router.replace('/login') }
-        ]);
+        setSaving(false);
+        Alert.alert('Session Expired', 'Please log in again.');
+        router.replace('/login');
         return;
       }
 
-      const payload: any = {
+      const payload = {
         id: user.id,
-        vehicle_year: profile.vehicle_year === '' ? null : parseInt(profile.vehicle_year, 10),
+        vehicle_year: profile.vehicle_year ? parseInt(profile.vehicle_year, 10) : null,
         vehicle_make: profile.vehicle_make || null,
         vehicle_model: profile.vehicle_model || null,
         vehicle_trim: profile.vehicle_trim || null,
-        tank_size_l: profile.tank_size_l === '' ? null : parseFloat(profile.tank_size_l),
-        fuel_efficiency: profile.fuel_efficiency === '' ? null : parseFloat(profile.fuel_efficiency),
+        tank_size_l: profile.tank_size_l ? parseFloat(profile.tank_size_l) : null,
+        fuel_efficiency: profile.fuel_efficiency ? parseFloat(profile.fuel_efficiency) : null,
         fuel_type: profile.fuel_type || null,
-        home_lat: profile.home_lat === '' ? null : parseFloat(profile.home_lat),
-        home_lng: profile.home_lng === '' ? null : parseFloat(profile.home_lng),
-        max_detour_km: profile.max_detour_km === '' ? 5.0 : parseFloat(profile.max_detour_km),
-        min_savings: profile.min_savings === '' ? 1.0 : parseFloat(profile.min_savings),
-        search_radius_km: profile.search_radius_km === '' ? 15.0 : parseFloat(profile.search_radius_km),
+        home_lat: profile.home_lat ? parseFloat(profile.home_lat) : null,
+        home_lng: profile.home_lng ? parseFloat(profile.home_lng) : null,
+        max_detour_km: profile.max_detour_km ? parseFloat(profile.max_detour_km) : 5.0,
+        min_savings: profile.min_savings ? parseFloat(profile.min_savings) : 1.0,
+        search_radius_km: profile.search_radius_km ? parseFloat(profile.search_radius_km) : 15.0,
         updated_at: new Date().toISOString(),
       };
 
-      console.log('Saving profile payload:', JSON.stringify(payload, null, 2));
-
-      const { data, error } = await supabase.from('profiles').upsert(payload);
-      
-      console.log('Upsert result - data:', data, 'error:', error);
+      const { error } = await supabase.from('profiles').upsert(payload);
       
       if (error) {
-        console.error('Supabase upsert error:', JSON.stringify(error, null, 2));
-        throw new Error(`Save failed: ${error.message}`);
+        setSaving(false);
+        Alert.alert('Error', error.message || 'Failed to save profile');
+        return;
       }
       
-      console.log('Profile saved successfully');
-      Alert.alert('Success', 'Profile saved successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
-    } catch (e: any) {
-      console.error('Save profile error:', e);
-      const errorMessage = e.message || 'Unknown error occurred';
-      
-      if (errorMessage.includes('fetch') || errorMessage.includes('network')) {
-        Alert.alert(
-          'Network Error', 
-          'Could not connect to the server. Please check your internet connection and try again.\n\nDetails: ' + errorMessage,
-          [{ text: 'OK' }]
-        );
-      } else if (errorMessage.includes('Authentication') || errorMessage.includes('log in')) {
-        Alert.alert('Session Expired', 'Please log in again.', [
-          { text: 'OK', onPress: () => router.replace('/login') }
-        ]);
-      } else {
-        Alert.alert('Save Error', errorMessage, [{ text: 'OK' }]);
-      }
-    } finally {
       setSaving(false);
+
+      // Return to main page view after save
+      router.replace('/(tabs)/');
+      
+    } catch (error: any) {
+      setSaving(false);
+      console.error('Save error:', error);
+      Alert.alert('Error', error.message || 'Failed to save profile');
     }
   };
 
   const getLocation = async () => {
+    setLocationFailed(false);
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission denied', 'Location permission is required.');
+        setLocationFailed(true);
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, timeout: 15000 });
       setProfile((p: any) => ({ 
         ...p, 
         home_lat: String(pos.coords.latitude), 
@@ -428,6 +410,7 @@ export default function ProfileScreen() {
       }));
     } catch (e: any) {
       console.error('Location error', e);
+      setLocationFailed(true);
       Alert.alert('Error', e.message || 'Failed to get location');
     } finally {
       setLocationLoading(false);
@@ -581,7 +564,7 @@ export default function ProfileScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.locationButtonText}>
-                {profile.home_lat && profile.home_lng ? '📍 Update Location' : '📍 Set My Location'}
+                📍 Find my location for me
               </Text>
             )}
           </TouchableOpacity>
@@ -592,23 +575,27 @@ export default function ProfileScreen() {
             </Text>
           )}
           
-          <Text style={styles.subLabel}>Or enter coordinates manually:</Text>
-          <View style={styles.row}>
-            <TextInput
-              style={[styles.input, styles.halfInput]}
-              placeholder="Latitude"
-              keyboardType="decimal-pad"
-              value={profile.home_lat}
-              onChangeText={(t) => setProfile({ ...profile, home_lat: t })}
-            />
-            <TextInput
-              style={[styles.input, styles.halfInput]}
-              placeholder="Longitude"
-              keyboardType="decimal-pad"
-              value={profile.home_lng}
-              onChangeText={(t) => setProfile({ ...profile, home_lng: t })}
-            />
-          </View>
+          {locationFailed && (
+            <>
+              <Text style={styles.subLabel}>Or enter coordinates manually:</Text>
+              <View style={styles.row}>
+                <TextInput
+                  style={[styles.input, styles.halfInput]}
+                  placeholder="Latitude"
+                  keyboardType="decimal-pad"
+                  value={profile.home_lat}
+                  onChangeText={(t) => setProfile({ ...profile, home_lat: t })}
+                />
+                <TextInput
+                  style={[styles.input, styles.halfInput]}
+                  placeholder="Longitude"
+                  keyboardType="decimal-pad"
+                  value={profile.home_lng}
+                  onChangeText={(t) => setProfile({ ...profile, home_lng: t })}
+                />
+              </View>
+            </>
+          )}
         </View>
 
         {/* Search Settings Section */}
