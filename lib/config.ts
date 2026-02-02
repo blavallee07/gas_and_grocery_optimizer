@@ -14,8 +14,7 @@ const getDevProxyBase = () => {
 };
 
 const DEV_PROXY = getDevProxyBase();
-
-// Railway production URL
 const PROD_PROXY = 'https://fabulous-amazement-production.up.railway.app/api';
 
-export const API_BASE = __DEV__ ? DEV_PROXY : PROD_PROXY;
+// Always use production API
+export const API_BASE = PROD_PROXY;
