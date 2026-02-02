@@ -2,11 +2,20 @@ import { supabase } from '@/lib/supabase';
 import { Picker } from '@react-native-picker/picker';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 const PROXY_BASE = 'http://localhost:3001/api';
-const FUELECONOMY_BASE = Platform.OS === 'web' ? `${PROXY_BASE}/fueleconomy` : 'https://www.fueleconomy.gov/ws/rest';
+// Temporarily use direct API access since proxy is having issues
+const FUELECONOMY_BASE = 'https://www.fueleconomy.gov/ws/rest';
+
+// Fallback list of common makes
+const FALLBACK_MAKES = [
+  'Acura', 'Audi', 'BMW', 'Buick', 'Cadillac', 'Chevrolet', 'Chrysler',
+  'Dodge', 'Ford', 'Genesis', 'GMC', 'Honda', 'Hyundai', 'Infiniti',
+  'Jeep', 'Kia', 'Lexus', 'Lincoln', 'Mazda', 'Mercedes-Benz', 'Mitsubishi',
+  'Nissan', 'Ram', 'Subaru', 'Tesla', 'Toyota', 'Volkswagen', 'Volvo'
+];
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -47,6 +56,7 @@ export default function ProfileScreen() {
   const [makesLoading, setMakesLoading] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const makesCache = useRef<Record<string, string[]>>({});
   const modelsCache = useRef<Record<string, string[]>>({});
@@ -57,18 +67,31 @@ export default function ProfileScreen() {
     (async () => {
       setLoading(true);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('Session error:', sessionError);
+          throw new Error('Authentication error. Please log in again.');
+        }
+        
         const user = session?.user;
         if (!user) {
+          console.log('No user session, redirecting to login');
           router.replace('/login');
           return;
         }
 
+        console.log('Loading profile for user:', user.id);
         const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-        if (error) throw error;
+        
+        if (error) {
+          console.error('Supabase fetch error:', error);
+          throw new Error(`Database error: ${error.message}`);
+        }
+        
         if (!mounted) return;
 
         if (data) {
+          console.log('Profile data loaded successfully');
           savedVehicleData.current = {
             make: data.vehicle_make ?? '',
             model: data.vehicle_model ?? '',
@@ -89,10 +112,23 @@ export default function ProfileScreen() {
             min_savings: data.min_savings?.toString() ?? '1.0',
             search_radius_km: data.search_radius_km?.toString() ?? '15.0',
           });
+        } else {
+          console.log('No existing profile data, starting fresh');
         }
       } catch (e: any) {
-        console.error('Load profile error', e);
-        Alert.alert('Error', e.message || 'Failed to load profile');
+        console.error('Load profile error:', e);
+        // Don't block the UI - let user create new profile even if load fails
+        if (e.message?.includes('Authentication') || e.message?.includes('log in')) {
+          Alert.alert('Session Expired', 'Please log in again.', [
+            { text: 'OK', onPress: () => router.replace('/login') }
+          ]);
+        } else {
+          Alert.alert(
+            'Load Error', 
+            'Could not load existing profile. You can still create a new one.\n\n' + (e.message || 'Unknown error'),
+            [{ text: 'OK' }]
+          );
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -108,17 +144,21 @@ export default function ProfileScreen() {
     let mounted = true;
     (async () => {
       setMakesLoading(true);
+      setApiError(null);
       try {
         let makesList: string[];
         if (makesCache.current[year]) {
           makesList = makesCache.current[year];
         } else {
           const res = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/make?year=${year}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
           const text = await res.text();
           if (!mounted) return;
-          const matches = [...text.matchAll(/<value>([^<]+)<\/text>/g)];
+          console.log('Makes API response:', text.substring(0, 500));
+          const matches = [...text.matchAll(/<text>([^<]+)<\/text>/g)];
           const list = matches.map(m => m[1]).filter(Boolean);
-          makesList = [...new Set(list)].sort();
+          makesList = list.length > 0 ? [...new Set(list)].sort() : FALLBACK_MAKES;
+          console.log('Parsed makes:', makesList.length, makesList.slice(0, 5));
           makesCache.current[year] = makesList;
         }
         setMakes(makesList);
@@ -132,9 +172,12 @@ export default function ProfileScreen() {
           setTrims([]);
           setProfile((p: any) => ({ ...p, vehicle_make: '', vehicle_model: '', vehicle_trim: '' }));
         }
-      } catch (e) {
-        console.warn('Failed to load makes', e);
-        setMakes([]);
+      } catch (e: any) {
+        console.error('Failed to load makes', e);
+        const errorMsg = e.message || 'Network error';
+        setApiError(`Unable to load vehicle makes from API. Using fallback list.`);
+        // Use fallback makes if API fails
+        setMakes(FALLBACK_MAKES);
       } finally {
         if (mounted) setMakesLoading(false);
       }
@@ -160,9 +203,11 @@ export default function ProfileScreen() {
           const res = await fetch(`${FUELECONOMY_BASE}/vehicle/menu/model?year=${year}&make=${encodeURIComponent(make)}`);
           const text = await res.text();
           if (!mounted) return;
-          const matches = [...text.matchAll(/<value>([^<]+)<\/text>/g)];
+          console.log('Models API response:', text.substring(0, 500));
+          const matches = [...text.matchAll(/<text>([^<]+)<\/text>/g)];
           const list = matches.map(m => m[1]).filter(Boolean);
           modelsList = [...new Set(list)].sort();
+          console.log('Parsed models:', modelsList.length, modelsList.slice(0, 5));
           modelsCache.current[cacheKey] = modelsList;
         }
         setModels(modelsList);
@@ -176,8 +221,10 @@ export default function ProfileScreen() {
           setTrims([]);
           setProfile((p: any) => ({ ...p, vehicle_model: '', vehicle_trim: '' }));
         }
-      } catch (e) {
-        console.warn('Failed to load models', e);
+      } catch (e: any) {
+        console.error('Failed to load models', e);
+        const errorMsg = e.message || 'Network error';
+        setApiError(`Unable to load vehicle models: ${errorMsg}`);
         setModels([]);
       } finally {
         if (mounted) setModelsLoading(false);
@@ -247,8 +294,10 @@ export default function ProfileScreen() {
           setProfile((p: any) => ({ ...p, fuel_type: fuelTypeMatch[1] }));
         }
       } catch (e: any) {
-        console.warn('Failed to lookup fuel economy', e);
-        setLookupError(String(e?.message ?? e));
+        console.error('Failed to lookup fuel economy', e);
+        const errorMsg = e.message || 'Network error';
+        setLookupError(errorMsg);
+        setManualFuelMode(true);
       }
     })();
 
@@ -279,8 +328,10 @@ export default function ProfileScreen() {
           setProfile((p: any) => ({ ...p, fuel_type: fuelTypeMatch[1] }));
         }
       } catch (e: any) {
-        console.warn('Failed to fetch vehicle details', e);
-        setLookupError(String(e?.message ?? e));
+        console.error('Failed to fetch vehicle details', e);
+        const errorMsg = e.message || 'Network error';
+        setLookupError(errorMsg);
+        setManualFuelMode(true);
       }
     })();
 
@@ -290,10 +341,20 @@ export default function ProfileScreen() {
   const save = async () => {
     setSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('Starting save operation...');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.error('Session error during save:', sessionError);
+        throw new Error('Authentication error. Please log in again.');
+      }
+      
       const user = session?.user;
       if (!user) {
-        router.replace('/login');
+        console.log('No user session during save');
+        Alert.alert('Session Expired', 'Please log in again.', [
+          { text: 'OK', onPress: () => router.replace('/login') }
+        ]);
         return;
       }
 
@@ -314,13 +375,38 @@ export default function ProfileScreen() {
         updated_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('profiles').upsert(payload, { returning: 'minimal' });
-      if (error) throw error;
-      Alert.alert('Saved', 'Profile saved successfully');
-      router.back();
+      console.log('Saving profile payload:', JSON.stringify(payload, null, 2));
+
+      const { data, error } = await supabase.from('profiles').upsert(payload);
+      
+      console.log('Upsert result - data:', data, 'error:', error);
+      
+      if (error) {
+        console.error('Supabase upsert error:', JSON.stringify(error, null, 2));
+        throw new Error(`Save failed: ${error.message}`);
+      }
+      
+      console.log('Profile saved successfully');
+      Alert.alert('Success', 'Profile saved successfully!', [
+        { text: 'OK', onPress: () => router.back() }
+      ]);
     } catch (e: any) {
-      console.error('Save profile error', e);
-      Alert.alert('Error', e.message || 'Failed to save profile');
+      console.error('Save profile error:', e);
+      const errorMessage = e.message || 'Unknown error occurred';
+      
+      if (errorMessage.includes('fetch') || errorMessage.includes('network')) {
+        Alert.alert(
+          'Network Error', 
+          'Could not connect to the server. Please check your internet connection and try again.\n\nDetails: ' + errorMessage,
+          [{ text: 'OK' }]
+        );
+      } else if (errorMessage.includes('Authentication') || errorMessage.includes('log in')) {
+        Alert.alert('Session Expired', 'Please log in again.', [
+          { text: 'OK', onPress: () => router.replace('/login') }
+        ]);
+      } else {
+        Alert.alert('Save Error', errorMessage, [{ text: 'OK' }]);
+      }
     } finally {
       setSaving(false);
     }
@@ -361,6 +447,16 @@ export default function ProfileScreen() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Your Profile</Text>
+
+        {apiError && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>⚠️ {apiError}</Text>
+            <Text style={styles.errorSubtext}>You can still enter vehicle information manually below.</Text>
+            <TouchableOpacity onPress={() => setApiError(null)} style={styles.dismissButton}>
+              <Text style={styles.dismissButtonText}>Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Vehicle Section */}
         <View style={styles.section}>
@@ -675,6 +771,35 @@ const styles = StyleSheet.create({
   warningText: {
     color: '#f57c00',
     fontSize: 14,
+  },
+  errorBox: {
+    backgroundColor: '#ffebee',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#c62828',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  errorSubtext: {
+    color: '#d32f2f',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  dismissButton: {
+    marginTop: 10,
+    padding: 8,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  dismissButtonText: {
+    color: '#c62828',
+    fontSize: 13,
+    fontWeight: '600',
   },
   locationButton: {
     backgroundColor: '#4285F4',

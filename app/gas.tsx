@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const PROXY_BASE = 'http://localhost:3001/api';
@@ -111,10 +111,26 @@ export default function GasScreen() {
       const radius = profileData.search_radius_km || 15;
       const url = `${PROXY_BASE}/gasbuddy/smart?lat=${profileData.home_lat}&lng=${profileData.home_lng}&radius=${radius}`;
       
-      const response = await fetch(url);
+      console.log('Fetching Ontario gas stations from:', url);
+      
+      const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      
+      if (!response.ok) {
+        console.error('HTTP error:', response.status, response.statusText);
+        if (response.status === 0 || !response.status) {
+          throw new Error('Cannot connect to server. Make sure the proxy server is running: cd server && node proxy.js');
+        }
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
       const data = await response.json();
+      console.log('Received data:', data.success, 'stations:', data.stations?.length || 0);
 
       if (!data.success) throw new Error(data.error || 'Failed to fetch stations');
+      
+      if (!data.stations || data.stations.length === 0) {
+        throw new Error('No gas stations found in your area. The proxy server may be having issues scraping GasBuddy. Try increasing your search radius or check the server logs.');
+      }
 
       const now = Date.now();
       try {

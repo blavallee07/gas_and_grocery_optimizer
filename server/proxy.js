@@ -232,6 +232,11 @@ app.use('/api/fueleconomy', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('Proxy server listening on http://localhost:' + PORT);
+});
+
+server.on('error', (err) => {
+  console.error('Server error:', err);
+  process.exit(1);
 });
