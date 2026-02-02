@@ -282,6 +282,10 @@ export default function GasScreen() {
   const sortedStations = getSortedStations(stations);
   const bestStation = stations.find(s => s.worth_it && s.net_savings > 0) || stations[0];
   const cheapestStation = [...stations].sort((a, b) => (a.price_per_l || 999) - (b.price_per_l || 999))[0];
+  // Find the most worth it station (highest net savings that's worth it)
+  const mostWorthItStation = [...stations]
+    .filter(s => s.worth_it && s.net_savings > 0)
+    .sort((a, b) => b.net_savings - a.net_savings)[0];
 
   return (
     <ScrollView 
@@ -402,7 +406,7 @@ export default function GasScreen() {
             <View style={styles.cardPriceMain}>
               <Text style={[
                 styles.cardPrice,
-                station.price_per_l === cheapestStation.price_per_l && styles.cardPriceCheapest,
+                mostWorthItStation && station.id === mostWorthItStation.id && styles.cardPriceCheapest,
               ]}>
                 ${station.price_per_l?.toFixed(3)}
               </Text>
@@ -424,15 +428,14 @@ export default function GasScreen() {
                 <Text style={styles.detailValue}>{station.driving_duration_min} min</Text>
               </View>
             )}
-            <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>Savings</Text>
-              <Text style={[
-                styles.detailValue,
-                station.net_savings > 0 ? styles.savingsPositiveText : styles.savingsNegativeText,
-              ]}>
-                {station.net_savings > 0 ? '+' : ''}${station.net_savings.toFixed(2)}
-              </Text>
-            </View>
+            {station.net_savings > 0 && (
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Savings</Text>
+                <Text style={[styles.detailValue, styles.savingsPositiveText]}>
+                  +${station.net_savings.toFixed(2)}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Status Badge */}
