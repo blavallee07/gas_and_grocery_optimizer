@@ -56,7 +56,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.greeting}>Hello, {userName}! 👋</Text>
+        <Text style={styles.greeting}>Hello, {userName}!</Text>
         <Text style={styles.subtitle}>Ready to save on gas?</Text>
       </View>
 
@@ -67,7 +67,7 @@ export default function HomeScreen() {
           onPress={() => router.push('/gas')}
           disabled={!hasLocation}
         >
-          <Text style={styles.mainActionEmoji}>⛽</Text>
+          <Text style={styles.mainActionEmoji}></Text>
           <Text style={styles.mainActionText}>Find Gas</Text>
           <Text style={styles.mainActionSubtext}>
             {hasLocation ? 'See nearby prices' : 'Set location first'}
@@ -79,7 +79,7 @@ export default function HomeScreen() {
             style={styles.secondaryAction} 
             onPress={() => router.push('/profile')}
           >
-            <Text style={styles.secondaryEmoji}>👤</Text>
+            <Text style={styles.secondaryEmoji}></Text>
             <Text style={styles.secondaryText}>Profile</Text>
           </TouchableOpacity>
 
@@ -87,7 +87,7 @@ export default function HomeScreen() {
             style={[styles.secondaryAction, styles.comingSoon]} 
             disabled
           >
-            <Text style={styles.secondaryEmoji}>🛒</Text>
+            <Text style={styles.secondaryEmoji}></Text>
             <Text style={styles.secondaryText}>Groceries</Text>
             <Text style={styles.comingSoonText}>Soon</Text>
           </TouchableOpacity>
@@ -99,7 +99,7 @@ export default function HomeScreen() {
         <Text style={styles.sectionTitle}>Setup Status</Text>
         
         <View style={[styles.statusCard, hasLocation ? styles.statusComplete : styles.statusIncomplete]}>
-          <Text style={styles.statusIcon}>{hasLocation ? '✅' : '⚠️'}</Text>
+          <Text style={styles.statusIcon}></Text>
           <View style={styles.statusInfo}>
             <Text style={styles.statusTitle}>Home Location</Text>
             <Text style={styles.statusSubtitle}>
@@ -110,13 +110,13 @@ export default function HomeScreen() {
           </View>
           {!hasLocation && (
             <TouchableOpacity onPress={() => router.push('/profile')}>
-              <Text style={styles.statusAction}>Set →</Text>
+              <Text style={styles.statusAction}>Set</Text>
             </TouchableOpacity>
           )}
         </View>
 
         <View style={[styles.statusCard, hasVehicle ? styles.statusComplete : styles.statusIncomplete]}>
-          <Text style={styles.statusIcon}>{hasVehicle ? '✅' : '⚠️'}</Text>
+          <Text style={styles.statusIcon}></Text>
           <View style={styles.statusInfo}>
             <Text style={styles.statusTitle}>Vehicle</Text>
             <Text style={styles.statusSubtitle}>
@@ -127,7 +127,7 @@ export default function HomeScreen() {
           </View>
           {!hasVehicle && (
             <TouchableOpacity onPress={() => router.push('/profile')}>
-              <Text style={styles.statusAction}>Set →</Text>
+              <Text style={styles.statusAction}>Set</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -193,10 +193,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#bdbdbd',
     shadowColor: '#000',
   },
-  mainActionEmoji: {
-    fontSize: 40,
-    marginBottom: 8,
-  },
   mainActionText: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -225,10 +221,6 @@ const styles = StyleSheet.create({
   },
   comingSoon: {
     opacity: 0.6,
-  },
-  secondaryEmoji: {
-    fontSize: 28,
-    marginBottom: 4,
   },
   secondaryText: {
     fontSize: 14,

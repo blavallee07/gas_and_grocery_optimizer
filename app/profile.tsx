@@ -381,9 +381,9 @@ export default function ProfileScreen() {
       }
       
       setSaving(false);
-
-      // Return to main page view after save
-      router.replace('/(tabs)/');
+      
+      // Navigate back to home page to indicate successful save
+      router.push('/(tabs)');
       
     } catch (error: any) {
       setSaving(false);
@@ -433,7 +433,7 @@ export default function ProfileScreen() {
 
         {apiError && (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>⚠️ {apiError}</Text>
+            <Text style={styles.errorText}>{apiError}</Text>
             <Text style={styles.errorSubtext}>You can still enter vehicle information manually below.</Text>
             <TouchableOpacity onPress={() => setApiError(null)} style={styles.dismissButton}>
               <Text style={styles.dismissButtonText}>Dismiss</Text>
@@ -443,7 +443,7 @@ export default function ProfileScreen() {
 
         {/* Vehicle Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🚗 Vehicle Information</Text>
+          <Text style={styles.sectionTitle}>Vehicle Information</Text>
           
           <Text style={styles.label}>Year</Text>
           <View style={styles.pickerContainer}>
@@ -514,14 +514,14 @@ export default function ProfileScreen() {
 
           {profile.fuel_efficiency ? (
             <View style={styles.infoBox}>
-              <Text style={styles.infoText}>⛽ Fuel efficiency: {profile.fuel_efficiency} L/100km</Text>
-              <Text style={styles.infoText}>🔋 Fuel type: {profile.fuel_type || 'Unknown'}</Text>
+              <Text style={styles.infoText}>Fuel efficiency: {profile.fuel_efficiency} L/100km</Text>
+              <Text style={styles.infoText}>Fuel type: {profile.fuel_type || 'Unknown'}</Text>
             </View>
           ) : null}
 
           {lookupError && (
             <TouchableOpacity style={styles.warningBox} onPress={() => setManualFuelMode(!manualFuelMode)}>
-              <Text style={styles.warningText}>⚠️ Auto-lookup failed. Tap to enter manually.</Text>
+              <Text style={styles.warningText}>Auto-lookup failed. Tap to enter manually.</Text>
             </TouchableOpacity>
           )}
 
@@ -557,14 +557,14 @@ export default function ProfileScreen() {
 
         {/* Location Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📍 Home Location</Text>
+          <Text style={styles.sectionTitle}>Home Location</Text>
           
           <TouchableOpacity style={styles.locationButton} onPress={getLocation} disabled={locationLoading}>
             {locationLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.locationButtonText}>
-                📍 Find my location for me
+                Find my location for me
               </Text>
             )}
           </TouchableOpacity>
@@ -600,7 +600,7 @@ export default function ProfileScreen() {
 
         {/* Search Settings Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚙️ Search Settings</Text>
+          <Text style={styles.sectionTitle}>Search Settings</Text>
 
           <Text style={styles.label}>Search Radius (km)</Text>
           <TextInput 
