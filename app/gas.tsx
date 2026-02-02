@@ -295,7 +295,7 @@ export default function GasScreen() {
   if (error) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.errorEmoji}>⚠️</Text>
+        <Text style={styles.errorEmoji}></Text>
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/profile')}>
           <Text style={styles.primaryButtonText}>Go to Profile</Text>
@@ -333,7 +333,7 @@ export default function GasScreen() {
       {cheapestStation && (
         <View style={styles.cheapestCard}>
           <View style={styles.cheapestBadge}>
-            <Text style={styles.cheapestBadgeText}>⛽ CHEAPEST</Text>
+            <Text style={styles.cheapestBadgeText}>CHEAPEST</Text>
           </View>
           <View style={styles.stationRow}>
             {getBrandLogo(cheapestStation.name) && (
@@ -343,7 +343,7 @@ export default function GasScreen() {
               <Text style={styles.stationName}>{cheapestStation.name}</Text>
               <Text style={styles.stationDistance}>
                 {cheapestStation.driving_distance_km?.toFixed(1) || cheapestStation.distance_km.toFixed(1)} km
-                {cheapestStation.driving_duration_min && ` • ${cheapestStation.driving_duration_min} min`}
+                {cheapestStation.driving_duration_min && ` ${cheapestStation.driving_duration_min} min`}
               </Text>
             </View>
             <View style={styles.priceContainer}>
@@ -353,7 +353,7 @@ export default function GasScreen() {
           </View>
           {cheapestStation.net_savings < 0 && (
             <Text style={styles.notWorthIt}>
-              ⚠️ Not worth the detour (${Math.abs(cheapestStation.net_savings).toFixed(2)} loss)
+              Not worth the detour (${Math.abs(cheapestStation.net_savings).toFixed(2)} loss)
             </Text>
           )}
         </View>
@@ -363,7 +363,7 @@ export default function GasScreen() {
       {bestSavingsStation && (
         <View style={styles.cheapestCard}>
           <View style={styles.cheapestBadge}>
-            <Text style={styles.cheapestBadgeText}>💚 BEST SAVINGS</Text>
+            <Text style={styles.cheapestBadgeText}>BEST SAVINGS</Text>
           </View>
           <View style={styles.stationRow}>
             {getBrandLogo(bestSavingsStation.name) ? (
@@ -377,7 +377,7 @@ export default function GasScreen() {
               <Text style={styles.stationName}>{bestSavingsStation.name}</Text>
               <Text style={styles.stationDistance}>
                 {bestSavingsStation.driving_distance_km?.toFixed(1) || bestSavingsStation.distance_km.toFixed(1)} km
-                {bestSavingsStation.driving_duration_min && ` • ${bestSavingsStation.driving_duration_min} min`}
+                {bestSavingsStation.driving_duration_min && ` ${bestSavingsStation.driving_duration_min} min`}
               </Text>
             </View>
             <View style={styles.priceContainer}>
@@ -448,12 +448,12 @@ export default function GasScreen() {
                 <Text style={styles.cardStationName} numberOfLines={1}>{station.name}</Text>
                 {station.is_baseline && (
                   <View style={styles.inlineBadge}>
-                    <Text style={styles.inlineBadgeText}>📍 Closest</Text>
+                    <Text style={styles.inlineBadgeText}>Closest</Text>
                   </View>
                 )}
                 {bestSavingsStation && station.id === bestSavingsStation.id && (
                   <View style={styles.bestSavingsBadge}>
-                    <Text style={styles.bestSavingsBadgeText}>💚 Best Savings</Text>
+                    <Text style={styles.bestSavingsBadgeText}>Best Savings</Text>
                   </View>
                 )}
               </View>
@@ -497,12 +497,12 @@ export default function GasScreen() {
           {/* Status Badge */}
           {station.worth_it && station.net_savings > 0 && (
             <View style={styles.worthItBanner}>
-              <Text style={styles.worthItBannerText}>✓ Worth the trip • Save ${station.net_savings.toFixed(2)}</Text>
+              <Text style={styles.worthItBannerText}>Worth the trip Save ${station.net_savings.toFixed(2)}</Text>
             </View>
           )}
           {station.net_savings < 0 && !station.is_baseline && (
             <View style={styles.notWorthItBanner}>
-              <Text style={styles.notWorthItBannerText}>⚠️ -${Math.abs(station.net_savings).toFixed(2)} net loss</Text>
+              <Text style={styles.notWorthItBannerText}>-${Math.abs(station.net_savings).toFixed(2)} net loss</Text>
             </View>
           )}
         </View>
@@ -510,7 +510,7 @@ export default function GasScreen() {
 
       <TouchableOpacity style={styles.refreshButton} onPress={onRefresh} disabled={refreshing}>
         <Text style={styles.refreshText}>
-          {refreshing ? '🔄 Refreshing...' : '🔄 Refresh Prices'}
+          {refreshing ? 'Refreshing...' : 'Refresh Prices'}
         </Text>
       </TouchableOpacity>
 
